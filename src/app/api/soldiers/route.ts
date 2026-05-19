@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { randomUUID } from 'crypto';
 
 // POST /api/soldiers — create a new soldier in the users table
 // Body: { first_name, last_name, personal_id, email, role?, primary_platoon_id? }
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await admin
     .from('users')
     .insert({
+      id:                 randomUUID(),
       first_name:         first_name.trim(),
       last_name:          last_name.trim(),
       personal_id:        personal_id.trim(),

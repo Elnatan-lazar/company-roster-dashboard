@@ -1,56 +1,79 @@
+import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 // GET /auth/callback
 // Supabase redirects here after Google OAuth with ?code=...
-// We exchange the code for a session and write our custom JSON cookie,
-// exactly matching the format set by verify-otp so the rest of the app
-// (getCallerProfile, getAuthenticatedUser) can read it.
+//
+// Critical: the PKCE code verifier was stored in a cookie by createBrowserClient
+// when signInWithOAuth was called. We MUST use @supabase/ssr's createServerClient
+// (with cookie adapters) so it can read that verifier and complete the exchange.
+// A plain supabase-js client has no cookie access and will always fail PKCE exchange.
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code  = searchParams.get('code');
   const error = searchParams.get('error');
 
   if (error) {
+    console.error('[auth/callback] OAuth error from provider:', error);
     return NextResponse.redirect(`${origin}/auth/login?error=${encodeURIComponent(error)}`);
   }
 
   if (!code) {
+    console.error('[auth/callback] No code in request — check Supabase Redirect URLs allowlist');
     return NextResponse.redirect(`${origin}/auth/login?error=no_code`);
   }
 
-  // Exchange the auth code for a session using a plain supabase-js client
-  // (no SSR wrapper — same pattern as verify-otp)
-  const supabase = createClient(
+  // Build the final redirect response NOW so we can attach cookies to it.
+  // (NextResponse.redirect creates the response object; cookies are added below.)
+  const response = NextResponse.redirect(`${origin}/dashboard`);
+
+  // Create a server-side Supabase client backed by this request's cookies.
+  // This gives exchangeCodeForSession access to the PKCE verifier cookie
+  // (sb-{ref}-auth-code-verifier) that was set by createBrowserClient.
+  const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } },
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          // Write any new/updated cookies (@supabase/ssr sets several) onto
+          // the redirect response so the browser receives them.
+          cookiesToSet.forEach(({ name, value, options }) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            response.cookies.set(name, value, options as any);
+          });
+        },
+      },
+    },
   );
 
   const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 
   if (exchangeError || !data.session) {
-    console.error('[auth/callback] exchange error:', exchangeError?.message);
+    console.error('[auth/callback] exchangeCodeForSession failed:', exchangeError?.message);
     return NextResponse.redirect(`${origin}/auth/login?error=exchange_failed`);
   }
 
-  // Derive the cookie name the same way as verify-otp and get-user
+  // Write our custom JSON session cookie so getCallerProfile() and
+  // getAuthenticatedUser() (which parse it manually) can read the session.
   const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL!
     .replace(/https?:\/\//, '')
     .replace(/\.supabase\.co.*/, '');
 
-  const cookieName  = `sb-${projectRef}-auth-token`;
-  const cookieValue = JSON.stringify(data.session);
-
-  const response = NextResponse.redirect(`${origin}/dashboard`);
-
-  response.cookies.set(cookieName, cookieValue, {
-    path:     '/',
-    sameSite: 'lax',
-    httpOnly: false,
-    secure:   process.env.NODE_ENV === 'production',
-    maxAge:   data.session.expires_in ?? 3600,
-  });
+  response.cookies.set(
+    `sb-${projectRef}-auth-token`,
+    JSON.stringify(data.session),
+    {
+      path:     '/',
+      sameSite: 'lax',
+      httpOnly: false,
+      secure:   process.env.NODE_ENV === 'production',
+      maxAge:   data.session.expires_in ?? 3600,
+    },
+  );
 
   return response;
 }

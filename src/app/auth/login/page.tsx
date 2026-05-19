@@ -36,23 +36,23 @@ function LoginForm() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error,       setError]       = useState<string | null>(null);
 
-  // Google OAuth
+  // Google OAuth — let Supabase handle the browser redirect automatically.
+  // redirectTo uses window.location.origin so it resolves to the correct host
+  // in every environment (localhost in dev, company-roster-dashboard.vercel.app in prod).
   async function handleGoogleSignIn() {
     setGoogleLoading(true);
     setError(null);
-    const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
-        skipBrowserRedirect: true,
       },
     });
-    if (oauthError || !data.url) {
+    if (oauthError) {
       setError('שגיאה בחיבור לגוגל. נסה שנית.');
       setGoogleLoading(false);
-      return;
     }
-    window.location.href = data.url;
+    // On success Supabase redirects the browser to Google — no further action needed.
   }
 
   // Step 1 — check whitelist then send OTP code

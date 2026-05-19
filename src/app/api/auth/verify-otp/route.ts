@@ -4,11 +4,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 export async function POST(request: NextRequest) {
   const { email, token } = await request.json();
 
+  console.log('[API-OTP] Incoming request for email:', email);
+
   if (!email || !token) {
+    console.log('[API-OTP] Missing email or token — returning 400');
     return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
   }
 
-  // Use plain supabase-js (no SSR wrapper) to verify the OTP and get the session
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -21,14 +23,13 @@ export async function POST(request: NextRequest) {
     type: 'email',
   });
 
-  console.log('[verify-otp] user:', data?.user?.email, '| error:', error?.message);
+  console.log('[API-OTP] Supabase output - session exists:', !!data.session, 'error:', error?.message);
 
   if (error || !data.session) {
+    console.log('[API-OTP] Verification failed — returning 401');
     return NextResponse.json({ error: error?.message ?? 'Failed' }, { status: 401 });
   }
 
-  // Extract the Supabase project ref from the URL to build the cookie name
-  // e.g. https://abcdef.supabase.co → abcdef
   const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL!
     .replace(/https?:\/\//, '')
     .replace(/\.supabase\.co.*/, '');
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
   const cookieName  = `sb-${projectRef}-auth-token`;
   const cookieValue = JSON.stringify(data.session);
 
-  console.log('[verify-otp] setting cookie:', cookieName, 'length:', cookieValue.length);
+  console.log('[API-OTP] Attempting to set cookie:', cookieName, 'Value preview:', cookieValue.substring(0, 30));
 
   const response = NextResponse.json({ success: true });
 
@@ -47,6 +48,8 @@ export async function POST(request: NextRequest) {
     secure:   true,
     maxAge:   data.session.expires_in ?? 3600,
   });
+
+  console.log('[API-OTP] Cookie set successfully — returning 200');
 
   return response;
 }

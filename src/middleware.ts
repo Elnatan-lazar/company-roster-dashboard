@@ -37,21 +37,28 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PREFIXES.some(prefix => pathname.startsWith(prefix));
 
+  console.log('[MIDDLEWARE] Path:', pathname, '| isPublic:', isPublic);
+
   const cookieName = `sb-${getProjectRef()}-auth-token`;
   const rawCookie  = request.cookies.get(cookieName)?.value;
+
+  console.log('[MIDDLEWARE] Raw cookie found:', !!rawCookie);
 
   let authenticated = false;
 
   if (rawCookie) {
     try {
       const session = JSON.parse(rawCookie);
+      console.log('[MIDDLEWARE] Parsed session valid token:', !!session?.access_token);
       if (session?.access_token) {
         authenticated = jwtIsValid(session.access_token);
       }
-    } catch {
-      // Malformed cookie — user stays unauthenticated
+    } catch (err) {
+      console.log('[MIDDLEWARE] Cookie parsing FAILED with error:', err);
     }
   }
+
+  console.log('[MIDDLEWARE] Route allowed status:', authenticated);
 
   // Unauthenticated request to a protected route → login
   if (!authenticated && !isPublic) {

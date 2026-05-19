@@ -62,12 +62,15 @@ function LoginForm() {
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setError(body.error ?? 'הקוד שגוי או שפג תוקפו. בקש קוד חדש.');
+      console.error('[CLIENT-OTP] Server returned error status:', res.status);
+      const errBody = await res.json().catch(() => ({}));
+      console.error('[CLIENT-OTP] Server error body:', errBody);
+      setError(errBody.error ?? 'הקוד שגוי או שפג תוקפו. בקש קוד חדש.');
       setLoading(false);
       return;
     }
 
+    console.log('[CLIENT-OTP] Server returned 200 — navigating to dashboard');
     window.location.href = '/dashboard';
   }
 

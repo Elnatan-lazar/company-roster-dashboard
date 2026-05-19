@@ -48,25 +48,38 @@ function LoginForm() {
     setLoading(false);
   }
 
-  // Step 2 — verify via server-side API route so session cookie is set by the server
+  // Step 2 — verify OTP in the browser so the same client context is used,
+  // then write the session cookie middleware.ts expects before navigating.
   async function handleVerifyOtp(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
-    const res = await fetch('/api/auth/verify-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.trim().toLowerCase(), token: otp.trim() }),
+    const { data, error: verifyError } = await supabase.auth.verifyOtp({
+      email: email.trim().toLowerCase(),
+      token: otp.trim(),
+      type:  'email',
     });
 
-    if (!res.ok) {
+    if (verifyError || !data.session) {
       setError('הקוד שגוי או שפג תוקפו. בקש קוד חדש.');
       setLoading(false);
       return;
     }
 
-    // Session cookie is now set server-side — hard navigate to dashboard
+    // Derive the same project-ref the middleware uses to name the cookie.
+    const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL!
+      .replace(/https?:\/\//, '')
+      .replace(/\.supabase\.co.*/, '');
+
+    const cookieName  = `sb-${projectRef}-auth-token`;
+    const cookieValue = encodeURIComponent(JSON.stringify(data.session));
+    const maxAge      = data.session.expires_in ?? 3600;
+    const secure      = location.protocol === 'https:' ? '; Secure' : '';
+
+    document.cookie =
+      `${cookieName}=${cookieValue}; path=/; max-age=${maxAge}; SameSite=Lax${secure}`;
+
     window.location.href = '/dashboard';
   }
 

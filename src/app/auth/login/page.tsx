@@ -48,37 +48,25 @@ function LoginForm() {
     setLoading(false);
   }
 
-  // Step 2 — verify OTP in the browser so the same client context is used,
-  // then write the session cookie middleware.ts expects before navigating.
+  // Step 2 — POST to the server route which verifies the OTP and sets
+  // the httpOnly session cookie, then hard-navigate to dashboard.
   async function handleVerifyOtp(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
-    const { data, error: verifyError } = await supabase.auth.verifyOtp({
-      email: email.trim().toLowerCase(),
-      token: otp.trim(),
-      type:  'email',
+    const res = await fetch('/api/auth/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase(), token: otp.trim() }),
     });
 
-    if (verifyError || !data.session) {
-      setError('הקוד שגוי או שפג תוקפו. בקש קוד חדש.');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? 'הקוד שגוי או שפג תוקפו. בקש קוד חדש.');
       setLoading(false);
       return;
     }
-
-    // Derive the same project-ref the middleware uses to name the cookie.
-    const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL!
-      .replace(/https?:\/\//, '')
-      .replace(/\.supabase\.co.*/, '');
-
-    const cookieName  = `sb-${projectRef}-auth-token`;
-    const cookieValue = encodeURIComponent(JSON.stringify(data.session));
-    const maxAge      = data.session.expires_in ?? 3600;
-    const secure      = location.protocol === 'https:' ? '; Secure' : '';
-
-    document.cookie =
-      `${cookieName}=${cookieValue}; path=/; max-age=${maxAge}; SameSite=Lax${secure}`;
 
     window.location.href = '/dashboard';
   }

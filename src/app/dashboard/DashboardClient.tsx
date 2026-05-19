@@ -84,6 +84,9 @@ export default function DashboardClient({
   const isMup    = currentUser.role === 'company_commander';
   const canEdit  = OFFICER_ROLES.includes(currentUser.role) || currentUser.can_edit_roster;
 
+  // Ref for click-outside detection on the config dropdown
+  const configMenuRef = useRef<HTMLDivElement>(null);
+
   // ── State ─────────────────────────────────────────────────
   const [localCrews,     setLocalCrews]     = useState(initialCrews);
   const [users,          setUsers]          = useState<UserRow[]>(initialUsers);
@@ -122,6 +125,17 @@ export default function DashboardClient({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [activeConfigId]);
+
+  // ── Click-outside: close config menu ──────────────────────
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (configMenuRef.current && !configMenuRef.current.contains(e.target as Node)) {
+        setConfigMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // ── Live sync: leave requests ──────────────────────────────
   useEffect(() => {
@@ -488,7 +502,7 @@ export default function DashboardClient({
           </div>
 
           {/* Config selector */}
-          <div className="relative flex-1 max-w-xs">
+          <div ref={configMenuRef} className="relative flex-1 max-w-xs">
             <button
               onClick={() => setConfigMenuOpen(o => !o)}
               className="w-full flex items-center justify-between gap-2 bg-olive-700 hover:bg-olive-600 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
@@ -894,10 +908,6 @@ export default function DashboardClient({
         />
       )}
 
-      {/* Backdrop for config menu */}
-      {configMenuOpen && (
-        <div className="fixed inset-0 z-20" onClick={() => setConfigMenuOpen(false)} />
-      )}
     </div>
   );
 }

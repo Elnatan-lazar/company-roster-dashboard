@@ -35,6 +35,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'מספר אישי כבר קיים במערכת' }, { status: 409 });
   }
 
+  // Omit can_edit_roster / can_view_feedback — they have DEFAULT false in the DB.
+  // Passing them explicitly triggers a PostgREST schema-cache error if the cache
+  // hasn't reloaded since the migration that added those columns.
   const { data, error } = await admin
     .from('users')
     .insert({
@@ -46,8 +49,6 @@ export async function POST(request: NextRequest) {
       primary_platoon_id: primary_platoon_id ?? null,
       status:             'available',
       medical_fitness:    false,
-      can_edit_roster:    false,
-      can_view_feedback:  false,
     })
     .select()
     .single();

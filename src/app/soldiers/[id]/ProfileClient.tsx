@@ -49,8 +49,9 @@ export default function ProfileClient({
 }: Props) {
   // ── Permission checks ────────────────────────────────────────
   const isOfficer    = OFFICER_ROLES.includes(currentUser.role);
-  const canEdit      = isOfficer || currentUser.can_edit_roster;
-  const canFeedback  = isOfficer || currentUser.can_view_feedback;
+  const isAdmin      = currentUser.is_admin || currentUser.role === 'company_commander';
+  const canEdit      = isAdmin || isOfficer || currentUser.can_edit_roster;
+  const canFeedback  = isAdmin || isOfficer || currentUser.can_view_feedback;
   const isMup        = currentUser.role === 'company_commander';
   const isOwnProfile = currentUser.id === soldier.id;
 

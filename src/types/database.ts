@@ -5,6 +5,36 @@ export type CrewPosition = 'commander' | 'gunner' | 'loader' | 'driver';
 export type SoldierStatus = 'available' | 'leave' | 'mission' | 'sick';
 export type RequestStatus = 'pending' | 'approved' | 'rejected';
 
+// ── Armor Corps UI roles (display only — maps to UserRole + CrewPosition) ────
+export type ArmorRole =
+  | 'officer'         // קצין
+  | 'tank_commander'  // מט"ק
+  | 'gunner'          // תותחן
+  | 'loader'          // טען
+  | 'driver'          // נהג
+  | 'technical'       // חוליה טכנית
+  | 'sergeant';       // מפלג
+
+export const ARMOR_ROLE_LABELS: Record<ArmorRole, string> = {
+  officer:       'קצין',
+  tank_commander: 'מט"ק',
+  gunner:        'תותחן',
+  loader:        'טען',
+  driver:        'נהג',
+  technical:     'חוליה טכנית',
+  sergeant:      'מפלג',
+};
+
+export const ARMOR_ROLE_TO_DB: Record<ArmorRole, { role: UserRole; crew_position: CrewPosition | null }> = {
+  officer:        { role: 'platoon_commander', crew_position: null },
+  tank_commander: { role: 'crew_commander',    crew_position: 'commander' },
+  gunner:         { role: 'soldier',           crew_position: 'gunner' },
+  loader:         { role: 'soldier',           crew_position: 'loader' },
+  driver:         { role: 'soldier',           crew_position: 'driver' },
+  technical:      { role: 'soldier',           crew_position: null },
+  sergeant:       { role: 'platoon_commander', crew_position: null },
+};
+
 // Hebrew display labels for enum values
 export const ROLE_LABELS: Record<UserRole, string> = {
   company_commander: 'מפקד פלוגה',

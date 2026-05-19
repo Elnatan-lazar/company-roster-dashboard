@@ -83,10 +83,13 @@ export default function DashboardClient({
   const fileInput    = useRef<HTMLInputElement>(null);
   const [, startTransition] = useTransition();
 
-  const isMup    = currentUser.role === 'company_commander';
-  const isAdmin  = currentUser.is_admin || isMup;
-  const canEdit  = isAdmin || OFFICER_ROLES.includes(currentUser.role) || currentUser.can_edit_roster;
+  const isMup           = currentUser.role === 'company_commander';
+  const isAdmin         = currentUser.is_admin || isMup;
+  const canEdit         = isAdmin || OFFICER_ROLES.includes(currentUser.role) || currentUser.can_edit_roster;
   const canViewFeedback = isAdmin || currentUser.can_view_feedback;
+  // Completely unprivileged — no admin, no edit, no feedback access
+  const isUnprivileged  = !isAdmin && !currentUser.can_edit_roster && !currentUser.can_view_feedback
+                          && !OFFICER_ROLES.includes(currentUser.role);
 
   // Ref for click-outside detection on the config dropdown
   const configMenuRef = useRef<HTMLDivElement>(null);
@@ -368,7 +371,7 @@ export default function DashboardClient({
   // ── Soldier management ─────────────────────────────────────
   const createSoldier = useCallback(async (form: {
     first_name: string; last_name: string; personal_id: string; email: string;
-    role: string; primary_platoon_id: string;
+    role: string; crew_position: string | null; primary_platoon_id: string | null;
   }) => {
     const res  = await fetch('/api/soldiers', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -407,7 +410,7 @@ export default function DashboardClient({
   // ── Permissions management (admin only) ───────────────────
   const togglePermission = useCallback(async (
     userId: string,
-    field: 'can_edit_roster' | 'can_view_feedback',
+    field: 'can_edit_roster' | 'can_view_feedback' | 'is_admin',
     value: boolean,
   ) => {
     const res  = await fetch(`/api/users/${userId}/permissions`, {
@@ -609,20 +612,28 @@ export default function DashboardClient({
               </button>
             )}
 
-            <button onClick={exportExcel}                      title="ייצא לאקסל"  className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"><FileDown className="w-4 h-4" /></button>
-            <button onClick={downloadTemplate}                  title="הורד תבנית"  className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"><Download className="w-4 h-4" /></button>
-            <button onClick={() => fileInput.current?.click()} title="ייבא מאקסל"  className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"><Upload   className="w-4 h-4" /></button>
-            <input ref={fileInput} type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" />
+            {/* Excel export/import — hidden for unprivileged soldiers */}
+            {!isUnprivileged && (
+              <>
+                <button onClick={exportExcel}                      title="ייצא לאקסל" className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"><FileDown className="w-4 h-4" /></button>
+                <button onClick={downloadTemplate}                  title="הורד תבנית" className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"><Download className="w-4 h-4" /></button>
+                <button onClick={() => fileInput.current?.click()} title="ייבא מאקסל" className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"><Upload   className="w-4 h-4" /></button>
+                <input ref={fileInput} type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" />
+              </>
+            )}
 
-            <button onClick={() => setWarningsOpen(true)} title="התראות"
-              className="relative p-1.5 hover:bg-olive-700 rounded-lg transition-colors">
-              <AlertTriangle className="w-4 h-4" />
-              {warnings.length > 0 && (
-                <span className="absolute -top-0.5 -left-0.5 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center font-bold">
-                  {warnings.length > 9 ? '9+' : warnings.length}
-                </span>
-              )}
-            </button>
+            {/* Warnings — hidden for unprivileged soldiers */}
+            {!isUnprivileged && (
+              <button onClick={() => setWarningsOpen(true)} title="התראות"
+                className="relative p-1.5 hover:bg-olive-700 rounded-lg transition-colors">
+                <AlertTriangle className="w-4 h-4" />
+                {warnings.length > 0 && (
+                  <span className="absolute -top-0.5 -left-0.5 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center font-bold">
+                    {warnings.length > 9 ? '9+' : warnings.length}
+                  </span>
+                )}
+              </button>
+            )}
 
             <button
               onClick={() => setViewMode(viewMode === 'tanks' ? 'table' : 'tanks')}
@@ -666,8 +677,8 @@ export default function DashboardClient({
           </button>
         </div>
 
-        {/* Bulk delete bar */}
-        {selectedIds.length > 0 && (
+        {/* Bulk delete bar — canEdit only */}
+        {canEdit && selectedIds.length > 0 && (
           <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
             <span className="text-sm font-medium text-red-700">{selectedIds.length} חיילים נבחרו</span>
             <button
@@ -1202,7 +1213,7 @@ function PermissionsModal({
 }: {
   users: UserRow[];
   currentUserId: string;
-  onToggle: (userId: string, field: 'can_edit_roster' | 'can_view_feedback', value: boolean) => void;
+  onToggle: (userId: string, field: 'can_edit_roster' | 'can_view_feedback' | 'is_admin', value: boolean) => void;
   onClose: () => void;
 }) {
   const ROLE_ORDER: Record<string, number> = {
@@ -1216,7 +1227,7 @@ function PermissionsModal({
     <ModalShell title="ניהול הרשאות" onClose={onClose}>
       <div className="px-4 py-3 max-h-[60vh] overflow-y-auto">
         <p className="text-xs text-gray-500 mb-3">
-          רק מנהל (מפקד פלוגה) יכול להעניק או לבטל הרשאות לחיילים אחרים.
+          רק מנהל מערכת יכול להעניק הרשאות. מנהל מערכת יכול גם למנות מנהלים נוספים.
         </p>
         <table className="w-full text-sm">
           <thead>
@@ -1224,12 +1235,13 @@ function PermissionsModal({
               <th className="pb-2 font-semibold">שם</th>
               <th className="pb-2 font-semibold text-center">עריכת שיבוץ</th>
               <th className="pb-2 font-semibold text-center">צפייה בפידבק</th>
+              <th className="pb-2 font-semibold text-center">מנהל מערכת</th>
             </tr>
           </thead>
           <tbody>
             {targets.map(u => (
               <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50">
-                <td className="py-2">
+                <td className="py-2 pr-1">
                   <p className="font-medium text-gray-800">{u.first_name} {u.last_name}</p>
                   <p className="text-[11px] text-gray-400">{ROLE_LABELS[u.role]}</p>
                 </td>
@@ -1247,6 +1259,15 @@ function PermissionsModal({
                     checked={u.can_view_feedback}
                     onChange={e => onToggle(u.id, 'can_view_feedback', e.target.checked)}
                     className="w-4 h-4 accent-olive-700 cursor-pointer"
+                  />
+                </td>
+                <td className="py-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={u.is_admin}
+                    onChange={e => onToggle(u.id, 'is_admin', e.target.checked)}
+                    className="w-4 h-4 accent-red-600 cursor-pointer"
+                    title="הענקת הרשאת מנהל"
                   />
                 </td>
               </tr>

@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 // insert the profile row into public.users using the returned auth ID.
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { first_name, last_name, personal_id, email, role, primary_platoon_id } = body;
+  const { first_name, last_name, personal_id, email, role, crew_position, primary_platoon_id } = body;
 
   if (!first_name?.trim() || !last_name?.trim() || !personal_id?.trim() || !email?.trim()) {
     return NextResponse.json(
@@ -69,9 +69,10 @@ export async function POST(request: NextRequest) {
       personal_id:        personal_id.trim(),
       email:              normalizedEmail,
       role:               role ?? 'soldier',
+      crew_position:      crew_position ?? null,
       primary_platoon_id: primary_platoon_id ?? null,
       status:             'available',
-      medical_fitness:    false,
+      medical_fitness:    true,
       can_edit_roster:    false,
       can_view_feedback:  false,
       is_admin:           false,

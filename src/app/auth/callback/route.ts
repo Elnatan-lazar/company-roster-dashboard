@@ -63,9 +63,18 @@ export async function GET(request: NextRequest) {
     .replace(/https?:\/\//, '')
     .replace(/\.supabase\.co.*/, '');
 
+  // Compact session — omit large `user` object to stay under 4 KB cookie limit.
+  const compactSession = {
+    access_token:  data.session.access_token,
+    refresh_token: data.session.refresh_token,
+    expires_in:    data.session.expires_in,
+    expires_at:    data.session.expires_at,
+    token_type:    data.session.token_type,
+  };
+
   response.cookies.set(
     `sb-${projectRef}-auth-token`,
-    JSON.stringify(data.session),
+    JSON.stringify(compactSession),
     {
       path:     '/',
       sameSite: 'lax',

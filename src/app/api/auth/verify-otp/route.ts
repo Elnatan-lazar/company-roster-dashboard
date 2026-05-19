@@ -34,7 +34,16 @@ export async function POST(request: NextRequest) {
     .replace(/\.supabase\.co.*/, '');
 
   const cookieName  = `sb-${projectRef}-auth-token`;
-  const cookieValue = JSON.stringify(data.session);
+  // Store only token fields — omitting the large `user` object keeps the cookie
+  // well under the 4 KB browser limit (full session with Google metadata can exceed it).
+  const compactSession = {
+    access_token:  data.session.access_token,
+    refresh_token: data.session.refresh_token,
+    expires_in:    data.session.expires_in,
+    expires_at:    data.session.expires_at,
+    token_type:    data.session.token_type,
+  };
+  const cookieValue = JSON.stringify(compactSession);
 
   console.log('[verify-otp] setting cookie:', cookieName, 'length:', cookieValue.length);
 

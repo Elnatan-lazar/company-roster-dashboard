@@ -1,86 +1,71 @@
-import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import type { Database } from '@/types/database';
 
-const PUBLIC_ROUTES = [
+// Routes that don't require authentication
+const PUBLIC_PREFIXES = [
   '/auth/login',
   '/auth/callback',
   '/auth/error',
   '/api/auth/check-whitelist',
   '/api/auth/verify-otp',
+  '/api/auth/me',
 ];
 
-// Extract project ref from Supabase URL
-// e.g. https://abcdef.supabase.co → abcdef
 function getProjectRef(): string {
   return process.env.NEXT_PUBLIC_SUPABASE_URL!
     .replace(/https?:\/\//, '')
     .replace(/\.supabase\.co.*/, '');
 }
 
+// Decode the JWT payload WITHOUT verifying the signature so we can read the
+// `exp` claim with zero network latency. The actual cryptographic validation
+// happens in every API route via getCallerProfile (admin client).
+function jwtIsValid(jwt: string): boolean {
+  try {
+    const base64 = jwt.split('.')[1]
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+    // `atob` is available in both Node.js 18+ and edge runtime
+    const payload = JSON.parse(atob(base64));
+    // exp is seconds since epoch
+    return typeof payload.exp === 'number' && payload.exp > Date.now() / 1000;
+  } catch {
+    return false;
+  }
+}
+
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request: { headers: request.headers },
-  });
+  const { pathname } = request.nextUrl;
+  const isPublic = PUBLIC_PREFIXES.some(prefix => pathname.startsWith(prefix));
 
-  const supabase = createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return request.cookies.getAll(); },
-        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            response.cookies.set(name, value, options as any)
-          );
-        },
-      },
-    }
-  );
-
-  const pathname  = request.nextUrl.pathname;
-  const isPublic  = PUBLIC_ROUTES.some((r) => pathname.startsWith(r));
-
-  // Read the session cookie directly and pass the JWT to getUser()
-  // This bypasses the @supabase/ssr storage adapter which has issues reading
-  // sessions set by our API route in some versions
   const cookieName = `sb-${getProjectRef()}-auth-token`;
-  const rawCookie  = request.cookies.get(cookieName);
+  const rawCookie  = request.cookies.get(cookieName)?.value;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let user: any = null;
+  let authenticated = false;
 
-  if (rawCookie?.value) {
+  if (rawCookie) {
     try {
-      const session = JSON.parse(rawCookie.value);
+      const session = JSON.parse(rawCookie);
       if (session?.access_token) {
-        // Pass JWT directly — skips internal storage, validates with Supabase servers
-        const { data } = await supabase.auth.getUser(session.access_token);
-        user = data.user ?? null;
+        authenticated = jwtIsValid(session.access_token);
       }
     } catch {
-      // Malformed cookie — user stays null
+      // Malformed cookie — user stays unauthenticated
     }
   }
 
-  // Redirect unauthenticated users to login
-  if (!user && !isPublic) {
+  // Unauthenticated request to a protected route → login
+  if (!authenticated && !isPublic) {
     const loginUrl = new URL('/auth/login', request.url);
     loginUrl.searchParams.set('redirectTo', pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // Redirect authenticated users away from login page
-  if (user && pathname.startsWith('/auth/login')) {
+  // Authenticated user visiting the login page → dashboard
+  if (authenticated && pathname.startsWith('/auth/login')) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  return response;
+  return NextResponse.next({ request: { headers: request.headers } });
 }
 
 export const config = {

@@ -40,13 +40,19 @@ function LoginForm() {
   async function handleGoogleSignIn() {
     setGoogleLoading(true);
     setError(null);
-    await supabase.auth.signInWithOAuth({
+    const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
+        skipBrowserRedirect: true,
       },
     });
-    // Supabase will redirect the browser away — no need to reset loading state
+    if (oauthError || !data.url) {
+      setError('שגיאה בחיבור לגוגל. נסה שנית.');
+      setGoogleLoading(false);
+      return;
+    }
+    window.location.href = data.url;
   }
 
   // Step 1 — check whitelist then send OTP code

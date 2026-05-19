@@ -14,10 +14,11 @@ export function createClient() {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
           try {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              cookieStore.set(name, value, options as any);
             });
           } catch {
             // Called from Server Component — middleware handles refresh
@@ -29,8 +30,10 @@ export function createClient() {
 }
 
 // Admin client — uses service_role key, bypasses RLS
-// ONLY use in trusted server-side API routes (e.g., bulk import, user creation)
-export function createAdminClient() {
+// Returns `any` intentionally: the Database generic doesn't fully cover all tables
+// (leave_requests, company_settings, etc.), so strict typing would produce `never`.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createAdminClient(): any {
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,

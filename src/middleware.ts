@@ -29,13 +29,14 @@ export async function middleware(request: NextRequest) {
     {
       cookies: {
         getAll() { return request.cookies.getAll(); },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
           response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            response.cookies.set(name, value, options as any)
           );
         },
       },
@@ -51,7 +52,8 @@ export async function middleware(request: NextRequest) {
   const cookieName = `sb-${getProjectRef()}-auth-token`;
   const rawCookie  = request.cookies.get(cookieName);
 
-  let user = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let user: any = null;
 
   if (rawCookie?.value) {
     try {

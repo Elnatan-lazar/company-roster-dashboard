@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   const configId = new URL(request.url).searchParams.get('configId');
   if (!configId) return NextResponse.json({ error: 'configId required' }, { status: 400 });
 
-  const admin = createAdminClient();
+  const admin = createAdminClient(); // typed as any — see createAdminClient
 
   const [
     { data: users },

@@ -1,0 +1,6 @@
+[submodule "gittest/gittest/TzviElnatan"]
+	path = gittest/gittest/TzviElnatan
+	url = https://github.com/TzviRechel/TzviElnatan.git
+[submodule "gittest/TzviElnatan"]
+	path = gittest/TzviElnatan
+	url = https://github.com/TzviRechel/TzviElnatan.git

@@ -8,7 +8,7 @@ import {
   Users, UserCheck, UserX, Shield,
   LayoutGrid, Table2, AlertTriangle, Download, Upload,
   FileDown, ChevronDown, Plus, Copy, Trash2, Target, X,
-  Calendar, UserPlus, ClipboardList,
+  Calendar, UserPlus, ClipboardList, KeyRound,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type {
@@ -50,6 +50,7 @@ type ModalState =
   | { type: 'confirm-bulk-delete';   ids: string[] }
   | { type: 'mup-transfer-warning' }
   | { type: 'leave-request' }
+  | { type: 'manage-permissions' }
   | null;
 
 // ── Props ─────────────────────────────────────────────────────
@@ -82,7 +83,9 @@ export default function DashboardClient({
   const [, startTransition] = useTransition();
 
   const isMup    = currentUser.role === 'company_commander';
-  const canEdit  = OFFICER_ROLES.includes(currentUser.role) || currentUser.can_edit_roster;
+  const isAdmin  = currentUser.is_admin || isMup;
+  const canEdit  = isAdmin || OFFICER_ROLES.includes(currentUser.role) || currentUser.can_edit_roster;
+  const canViewFeedback = isAdmin || currentUser.can_view_feedback;
 
   // Ref for click-outside detection on the config dropdown
   const configMenuRef = useRef<HTMLDivElement>(null);
@@ -400,6 +403,24 @@ export default function DashboardClient({
     setModal(null);
   }, []);
 
+  // ── Permissions management (admin only) ───────────────────
+  const togglePermission = useCallback(async (
+    userId: string,
+    field: 'can_edit_roster' | 'can_view_feedback',
+    value: boolean,
+  ) => {
+    const res  = await fetch(`/api/users/${userId}/permissions`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    });
+    const data = await res.json();
+    if (data.user) {
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, [field]: value } : u));
+    } else {
+      setSaveError(data.error ?? 'שגיאה בעדכון הרשאות');
+    }
+  }, []);
+
   // ── Leave requests ─────────────────────────────────────────
   const submitLeaveRequest = useCallback(async (form: {
     start_date: string; end_date: string; leave_time: string; reason: string;
@@ -472,7 +493,7 @@ export default function DashboardClient({
   const UNASSIGNED_TAB   = 'unassigned';
   const LEAVE_REQ_TAB    = 'leave-requests';
 
-  const canManageRequests = isMup || OFFICER_ROLES.includes(currentUser.role) || currentUser.can_view_feedback;
+  const canManageRequests = isAdmin || OFFICER_ROLES.includes(currentUser.role) || canViewFeedback;
 
   // ── Render ─────────────────────────────────────────────────
   return (
@@ -576,6 +597,17 @@ export default function DashboardClient({
               </button>
             )}
 
+            {/* Manage permissions — admin only */}
+            {isAdmin && (
+              <button
+                onClick={() => setModal({ type: 'manage-permissions' })}
+                title="ניהול הרשאות"
+                className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"
+              >
+                <KeyRound className="w-4 h-4" />
+              </button>
+            )}
+
             <button onClick={exportExcel}                      title="ייצא לאקסל"  className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"><FileDown className="w-4 h-4" /></button>
             <button onClick={downloadTemplate}                  title="הורד תבנית"  className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"><Download className="w-4 h-4" /></button>
             <button onClick={() => fileInput.current?.click()} title="ייבא מאקסל"  className="p-1.5 hover:bg-olive-700 rounded-lg transition-colors"><Upload   className="w-4 h-4" /></button>
@@ -619,9 +651,9 @@ export default function DashboardClient({
           <StatCard icon={<UserX     className="w-4 h-4 text-red-600"    />} iconBg="bg-red-100"   label='חו"ש/חולים'   value={stats.offDuty}      />
           <StatCard icon={<Shield   className="w-4 h-4 text-blue-700"    />} iconBg="bg-blue-100"  label="כשירות רפואית" value={`${stats.medFit}%`} />
           <button
-            onClick={() => isMup ? setModal({ type: 'strength-goals', form: { ...settings } }) : undefined}
-            className={`text-right ${isMup ? 'cursor-pointer hover:ring-2 hover:ring-olive-400 rounded-xl' : ''}`}
-            title={isMup ? 'לחץ להגדרת יעדי כוח' : undefined}
+            onClick={() => isAdmin ? setModal({ type: 'strength-goals', form: { ...settings } }) : undefined}
+            className={`text-right ${isAdmin ? 'cursor-pointer hover:ring-2 hover:ring-olive-400 rounded-xl' : ''}`}
+            title={isAdmin ? 'לחץ להגדרת יעדי כוח' : undefined}
           >
             <StatCard
               icon={<Target className="w-4 h-4 text-purple-700" />}
@@ -908,6 +940,15 @@ export default function DashboardClient({
         />
       )}
 
+      {modal?.type === 'manage-permissions' && (
+        <PermissionsModal
+          users={users}
+          currentUserId={currentUser.id}
+          onToggle={togglePermission}
+          onClose={() => setModal(null)}
+        />
+      )}
+
     </div>
   );
 }
@@ -1053,28 +1094,34 @@ function CreateSoldierModal({
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
-  const LabelInput = ({ label, k, type = 'text', placeholder = '' }: { label: string; k: string; type?: string; placeholder?: string }) => (
-    <div>
-      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-      <input
-        type={type}
-        value={form[k as keyof typeof form]}
-        onChange={e => set(k, e.target.value)}
-        placeholder={placeholder}
-        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-olive-400"
-      />
-    </div>
-  );
+  const fieldCls = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-olive-400';
+  const labelCls = 'block text-xs font-semibold text-gray-600 mb-1';
 
   return (
     <ModalShell title="צור חייל חדש" onClose={onClose}>
       <div className="px-6 py-4 space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <LabelInput label="שם פרטי *" k="first_name" placeholder="ישראל" />
-          <LabelInput label="שם משפחה *" k="last_name" placeholder="ישראלי" />
+          <div>
+            <label className={labelCls}>שם פרטי *</label>
+            <input type="text" value={form.first_name} onChange={e => set('first_name', e.target.value)}
+              placeholder="ישראל" className={fieldCls} />
+          </div>
+          <div>
+            <label className={labelCls}>שם משפחה *</label>
+            <input type="text" value={form.last_name} onChange={e => set('last_name', e.target.value)}
+              placeholder="ישראלי" className={fieldCls} />
+          </div>
         </div>
-        <LabelInput label='מספר אישי *' k="personal_id" placeholder="1234567" />
-        <LabelInput label="אימייל *" k="email" type="email" placeholder="soldier@example.com" />
+        <div>
+          <label className={labelCls}>מספר אישי *</label>
+          <input type="text" value={form.personal_id} onChange={e => set('personal_id', e.target.value)}
+            placeholder="1234567" className={fieldCls} />
+        </div>
+        <div>
+          <label className={labelCls}>אימייל *</label>
+          <input type="email" value={form.email} onChange={e => set('email', e.target.value)}
+            placeholder="soldier@example.com" className={fieldCls} />
+        </div>
         <div>
           <label className="block text-xs font-semibold text-gray-600 mb-1">תפקיד</label>
           <select
@@ -1231,6 +1278,73 @@ function GoalRow({ label, value, onChange, note }: { label: string; value: numbe
         className="w-16 text-center px-2 py-1 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-olive-400"
       />
     </div>
+  );
+}
+
+// ── Permissions Modal (admin only) ───────────────────────────
+function PermissionsModal({
+  users, currentUserId, onToggle, onClose,
+}: {
+  users: UserRow[];
+  currentUserId: string;
+  onToggle: (userId: string, field: 'can_edit_roster' | 'can_view_feedback', value: boolean) => void;
+  onClose: () => void;
+}) {
+  const ROLE_ORDER: Record<string, number> = {
+    company_commander: 0, platoon_commander: 1, crew_commander: 2, soldier: 3,
+  };
+  const targets = [...users]
+    .filter(u => u.id !== currentUserId)
+    .sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9));
+
+  return (
+    <ModalShell title="ניהול הרשאות" onClose={onClose}>
+      <div className="px-4 py-3 max-h-[60vh] overflow-y-auto">
+        <p className="text-xs text-gray-500 mb-3">
+          רק מנהל (מפקד פלוגה) יכול להעניק או לבטל הרשאות לחיילים אחרים.
+        </p>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-right text-xs font-bold text-gray-500 border-b border-gray-100">
+              <th className="pb-2 font-semibold">שם</th>
+              <th className="pb-2 font-semibold text-center">עריכת שיבוץ</th>
+              <th className="pb-2 font-semibold text-center">צפייה בפידבק</th>
+            </tr>
+          </thead>
+          <tbody>
+            {targets.map(u => (
+              <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50">
+                <td className="py-2">
+                  <p className="font-medium text-gray-800">{u.first_name} {u.last_name}</p>
+                  <p className="text-[11px] text-gray-400">{ROLE_LABELS[u.role]}</p>
+                </td>
+                <td className="py-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={u.can_edit_roster}
+                    onChange={e => onToggle(u.id, 'can_edit_roster', e.target.checked)}
+                    className="w-4 h-4 accent-olive-700 cursor-pointer"
+                  />
+                </td>
+                <td className="py-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={u.can_view_feedback}
+                    onChange={e => onToggle(u.id, 'can_view_feedback', e.target.checked)}
+                    className="w-4 h-4 accent-olive-700 cursor-pointer"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-6 pb-4 flex justify-end">
+        <button onClick={onClose} className="px-4 py-2 text-sm font-semibold bg-olive-700 text-white rounded-xl hover:bg-olive-800">
+          סגור
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 

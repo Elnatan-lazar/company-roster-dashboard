@@ -49,6 +49,9 @@ export async function POST(request: NextRequest) {
       primary_platoon_id: primary_platoon_id ?? null,
       status:             'available',
       medical_fitness:    false,
+      can_edit_roster:    false,
+      can_view_feedback:  false,
+      is_admin:           false,
     })
     .select()
     .single();

@@ -107,6 +107,7 @@ export interface UserRow {
   is_backup_in_crew_id:      string | null;
   can_edit_roster:           boolean;
   can_view_feedback:         boolean;
+  is_admin:                  boolean;
   created_at:                string;
   updated_at:                string;
 }

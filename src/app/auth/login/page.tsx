@@ -70,8 +70,10 @@ function LoginForm() {
       return;
     }
 
-    console.log('[CLIENT-OTP] Server returned 200 — navigating to dashboard');
-    window.location.href = '/dashboard';
+    console.log('[CLIENT-OTP] Server returned 200 — waiting 500ms for cookie propagation');
+    setTimeout(() => {
+      window.location.href = '/dashboard';
+    }, 500);
   }
 
   return (

@@ -1,10 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { getCallerProfile } from '@/lib/auth/get-user';
 
-// POST /api/soldiers — create a new soldier
+// POST /api/soldiers — create a new soldier (requires canEdit)
 // Flow: create auth.users entry first (so the FK is satisfied), then
 // insert the profile row into public.users using the returned auth ID.
 export async function POST(request: NextRequest) {
+  const caller = await getCallerProfile(request);
+  if (!caller)          return NextResponse.json({ error: 'Unauthorized' },        { status: 401 });
+  if (!caller.canEdit)  return NextResponse.json({ error: 'אין הרשאות עריכה' }, { status: 403 });
+
   const body = await request.json();
   const { first_name, last_name, personal_id, email, role, crew_position, primary_platoon_id } = body;
 

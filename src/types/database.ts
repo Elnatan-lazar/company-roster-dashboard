@@ -244,6 +244,18 @@ export interface LeaveRequest {
   platoon_id?:   string | null;
 }
 
+// ── Activity Logs ──────────────────────────────────────────────
+export interface ActivityLog {
+  id:         string;
+  action:     string;
+  actor_id:   string | null;
+  target_id:  string | null;
+  details:    Record<string, unknown> | null;
+  created_at: string;
+  // Enriched by API:
+  actor_name?: string;
+}
+
 // ── Company Settings ───────────────────────────────────────────
 export interface CompanySettings {
   id:                  string;

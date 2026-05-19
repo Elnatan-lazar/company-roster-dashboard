@@ -25,8 +25,8 @@ interface Props {
   positions:          string[];
   getSlotUser:        (posLabel: string) => UserRow | undefined;
   getCrewAssignments: () => { assignment: DeploymentAssignment; user: UserRow }[];
-  onOpenSidebar:      (posLabel: string) => void;
-  onUnassign:         (userId: string) => void;
+  onOpenSidebar?:     (posLabel: string) => void;
+  onUnassign?:        (userId: string) => void;
   onViewProfile:      (userId: string) => void;
   onDeleteCrew?:      () => void;
   getStatus:          (u: UserRow) => SoldierStatus;
@@ -90,7 +90,7 @@ export default function TankCard({
               key={pos}
               posLabel={pos}
               soldier={getSlotUser(pos)}
-              onAssign={() => onOpenSidebar(pos)}
+              onAssign={onOpenSidebar ? () => onOpenSidebar(pos) : undefined}
               onUnassign={onUnassign}
               onViewProfile={onViewProfile}
               getStatus={getStatus}
@@ -103,15 +103,17 @@ export default function TankCard({
                 key={user.id}
                 posLabel={assignment.position_label}
                 soldier={user}
-                onAssign={() => onOpenSidebar(assignment.position_label)}
+                onAssign={onOpenSidebar ? () => onOpenSidebar(assignment.position_label) : undefined}
                 onUnassign={onUnassign}
                 onViewProfile={onViewProfile}
                 getStatus={getStatus}
               />
             ))}
-            <div className="px-3 py-2">
-              <AddMemberInline onConfirm={label => onOpenSidebar(label)} />
-            </div>
+            {onOpenSidebar && (
+              <div className="px-3 py-2">
+                <AddMemberInline onConfirm={label => onOpenSidebar(label)} />
+              </div>
+            )}
           </>
         )}
       </div>
@@ -162,12 +164,12 @@ function AddMemberInline({ onConfirm }: { onConfirm: (label: string) => void }) 
 function PositionRow({
   posLabel, soldier, onAssign, onUnassign, onViewProfile, getStatus,
 }: {
-  posLabel:      string;
-  soldier:       UserRow | undefined;
-  onAssign:      () => void;
-  onUnassign:    (userId: string) => void;
-  onViewProfile: (userId: string) => void;
-  getStatus:     (u: UserRow) => SoldierStatus;
+  posLabel:       string;
+  soldier:        UserRow | undefined;
+  onAssign?:      () => void;
+  onUnassign?:    (userId: string) => void;
+  onViewProfile:  (userId: string) => void;
+  getStatus:      (u: UserRow) => SoldierStatus;
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -214,7 +216,7 @@ function PositionRow({
                 <Phone className="w-3.5 h-3.5" />
               </a>
             )}
-            {hovered && (
+            {hovered && onUnassign && (
               <button
                 onClick={() => onUnassign(soldier.id)}
                 className="text-red-400 hover:text-red-600 transition-colors"
@@ -227,12 +229,16 @@ function PositionRow({
         </div>
       ) : (
         <div className="flex-1">
-          <button
-            onClick={onAssign}
-            className="w-full text-right text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg px-3 py-1 hover:border-olive-400 hover:text-olive-600 transition-colors"
-          >
-            לחץ לשיבוץ מהיר
-          </button>
+          {onAssign ? (
+            <button
+              onClick={onAssign}
+              className="w-full text-right text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg px-3 py-1 hover:border-olive-400 hover:text-olive-600 transition-colors"
+            >
+              לחץ לשיבוץ מהיר
+            </button>
+          ) : (
+            <span className="text-xs text-gray-300 px-3 py-1 block">פנוי</span>
+          )}
         </div>
       )}
     </div>

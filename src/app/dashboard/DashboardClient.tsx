@@ -8,12 +8,12 @@ import {
   Users, UserCheck, UserX, Shield,
   LayoutGrid, Table2, AlertTriangle, Download, Upload,
   FileDown, ChevronDown, Plus, Copy, Trash2, Target, X,
-  Calendar, UserPlus, ClipboardList, KeyRound,
+  Calendar, UserPlus, ClipboardList, KeyRound, History, Loader2,
 } from 'lucide-react';
 import type {
   PlatoonRow, CrewRow, UserRow, SoldierStatus,
   DeploymentConfig, DeploymentAssignment, Warning, CompanySettings,
-  LeaveRequest,
+  LeaveRequest, ActivityLog,
 } from '@/types/database';
 import { ROLE_LABELS, STATUS_LABELS, POSITION_LABELS } from '@/types/database';
 import TankCard          from './components/TankCard';
@@ -45,6 +45,7 @@ type ModalState =
   | { type: 'new-config';            inputValue: string }
   | { type: 'duplicate-config';      inputValue: string }
   | { type: 'delete-config' }
+  | { type: 'delete-platoon';        platoonId: string; platoonName: string }
   | { type: 'strength-goals';        form: CompanySettings }
   | { type: 'create-soldier' }
   | { type: 'confirm-bulk-delete';   ids: string[] }
@@ -81,13 +82,12 @@ export default function DashboardClient({
   const fileInput    = useRef<HTMLInputElement>(null);
   const [, startTransition] = useTransition();
 
-  const isMup           = currentUser.role === 'company_commander';
-  const isAdmin         = currentUser.is_admin || isMup;
-  const canEdit         = isAdmin || OFFICER_ROLES.includes(currentUser.role) || currentUser.can_edit_roster;
-  const canViewFeedback = isAdmin || currentUser.can_view_feedback;
-  // Completely unprivileged — no admin, no edit, no feedback access
-  const isUnprivileged  = !isAdmin && !currentUser.can_edit_roster && !currentUser.can_view_feedback
-                          && !OFFICER_ROLES.includes(currentUser.role);
+  // ── Client-side permissions (strict default = false until /api/auth/me confirms) ──
+  // We do NOT derive permissions from the SSR prop alone; a verified API round-trip
+  // sets the real values so no stale/incorrect prop can grant access.
+  const [clientPerms, setClientPerms] = useState<{
+    isAdmin: boolean; canEdit: boolean; canViewFeedback: boolean;
+  } | null>(null);
 
   // Ref for click-outside detection on the config dropdown
   const configMenuRef = useRef<HTMLDivElement>(null);
@@ -96,10 +96,13 @@ export default function DashboardClient({
   const [localCrews,     setLocalCrews]     = useState(initialCrews);
   const [users,          setUsers]          = useState<UserRow[]>(initialUsers);
   const [configs,        setConfigs]        = useState(initialConfigs);
+  const [localPlatoons,  setLocalPlatoons]  = useState<PlatoonRow[]>(platoons);
   const [settings,       setSettings]       = useState<CompanySettings>(initialSettings);
   const [modal,          setModal]          = useState<ModalState>(null);
   const [leaveRequests,  setLeaveRequests]  = useState<LeaveRequest[]>([]);
   const [selectedIds,    setSelectedIds]    = useState<string[]>([]);
+  const [activityLogs,   setActivityLogs]   = useState<ActivityLog[]>([]);
+  const [logsLoading,    setLogsLoading]    = useState(false);
 
   const [activeConfigId, setActiveConfigIdState] = useState(
     searchParams.get('configId') ?? initialConfigId
@@ -140,6 +143,25 @@ export default function DashboardClient({
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // ── Permission verification (iron-clad: always check server) ─
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d) {
+          setClientPerms({
+            isAdmin:         Boolean(d.isAdmin),
+            canEdit:         Boolean(d.canEdit),
+            canViewFeedback: Boolean(d.canViewFeedback),
+          });
+        } else {
+          // Session invalid → lock everything down
+          setClientPerms({ isAdmin: false, canEdit: false, canViewFeedback: false });
+        }
+      })
+      .catch(() => setClientPerms({ isAdmin: false, canEdit: false, canViewFeedback: false }));
   }, []);
 
   // ── Live sync: leave requests ──────────────────────────────
@@ -221,7 +243,7 @@ export default function DashboardClient({
   const warnings = useMemo((): Warning[] => {
     const issues: Warning[] = [];
     localCrews.forEach(crew => {
-      const p = platoons.find(pl => pl.id === crew.platoon_id);
+      const p = localPlatoons.find(pl => pl.id === crew.platoon_id);
       if (!isCrewCombat(crew, p)) return;
       const ca    = assignments.filter(a => a.crew_id === crew.id);
       const label = `${p?.name ?? ''} — ${crew.name}`;
@@ -242,7 +264,7 @@ export default function DashboardClient({
         issues.push({ id: `eq-${u.id}`, type: 'expired_qual', message: `${name}: כישור מטווח פג`, userId: u.id });
     });
     return issues;
-  }, [assignments, localCrews, platoons, users]);
+  }, [assignments, localCrews, localPlatoons, users]);
 
   // ── Mutations ──────────────────────────────────────────────
   const assign = useCallback(async (userId: string, crewId: string, posLabel: string) => {
@@ -366,6 +388,25 @@ export default function DashboardClient({
     await fetch(`/api/crews/${crew.id}`, { method: 'DELETE' });
   }, []);
 
+  const deletePlatoon = useCallback(async (platoonId: string) => {
+    const res = await fetch(`/api/platoons/${platoonId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setSaveError(d.error ?? 'שגיאה במחיקת מחלקה');
+      setModal(null);
+      return;
+    }
+    // Remove platoon + its crews + their assignments from local state
+    const deletedCrewIds = new Set(localCrews.filter(c => c.platoon_id === platoonId).map(c => c.id));
+    setLocalCrews(prev => prev.filter(c => c.platoon_id !== platoonId));
+    setAssignments(prev => prev.filter(a => !deletedCrewIds.has(a.crew_id ?? '')));
+    setLocalPlatoons(prev => prev.filter(p => p.id !== platoonId));
+    setUsers(prev => prev.map(u => u.primary_platoon_id === platoonId ? { ...u, primary_platoon_id: null } : u));
+    // If the deleted platoon was the active tab, switch away
+    setActiveTabState(prev => (prev === platoonId ? 'unassigned' : prev));
+    setModal(null);
+  }, [localCrews]);
+
   // ── Soldier management ─────────────────────────────────────
   const createSoldier = useCallback(async (form: {
     first_name: string; last_name: string; personal_id: string; email: string;
@@ -482,15 +523,34 @@ export default function DashboardClient({
     startTransition(() => router.refresh());
   };
 
+  // ── Verified permission flags (all false until /api/auth/me responds) ─────
+  const isAdmin         = clientPerms?.isAdmin         ?? false;
+  const canEdit         = clientPerms?.canEdit         ?? false;
+  const canViewFeedback = clientPerms?.canViewFeedback ?? false;
+  const isUnprivileged  = clientPerms !== null && !isAdmin && !canEdit && !canViewFeedback;
+
   const today = new Date().toLocaleDateString('he-IL', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
 
-  const displayPlatoons  = platoons.filter(p => p.platoon_number <= 5);
-  const UNASSIGNED_TAB   = 'unassigned';
-  const LEAVE_REQ_TAB    = 'leave-requests';
+  const displayPlatoons   = localPlatoons.filter(p => p.platoon_number <= 5);
+  const UNASSIGNED_TAB    = 'unassigned';
+  const LEAVE_REQ_TAB     = 'leave-requests';
+  const ACTIVITY_LOG_TAB  = 'activity-logs';
 
   const canManageRequests = isAdmin || OFFICER_ROLES.includes(currentUser.role) || canViewFeedback;
+
+  // ── Loading guard — show spinner until server confirms permissions ──
+  if (clientPerms === null) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center" dir="rtl">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-olive-700 mx-auto mb-3" />
+          <p className="text-sm text-gray-500">מאמת הרשאות...</p>
+        </div>
+      </div>
+    );
+  }
 
   // ── Render ─────────────────────────────────────────────────
   return (
@@ -699,11 +759,23 @@ export default function DashboardClient({
           {/* Tab bar */}
           <div className="flex gap-1 p-1.5 border-b border-gray-100 overflow-x-auto">
             {displayPlatoons.map(p => (
-              <button key={p.id} onClick={() => setActiveTab(p.id)}
-                className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap
-                  ${activeTab === p.id ? 'bg-olive-700 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'}`}>
-                {p.platoon_number === 0 ? 'מפקדת פלוגה' : p.name}
-              </button>
+              <div key={p.id} className="relative flex items-center shrink-0 group">
+                <button onClick={() => setActiveTab(p.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap
+                    ${activeTab === p.id ? 'bg-olive-700 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'}
+                    ${isAdmin ? 'pr-6' : ''}`}>
+                  {p.platoon_number === 0 ? 'מפקדת פלוגה' : p.name}
+                </button>
+                {isAdmin && (
+                  <button
+                    onClick={e => { e.stopPropagation(); setModal({ type: 'delete-platoon', platoonId: p.id, platoonName: p.platoon_number === 0 ? 'מפקדת פלוגה' : p.name }); }}
+                    title={`מחק ${p.name}`}
+                    className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             ))}
             <button onClick={() => setActiveTab(UNASSIGNED_TAB)}
               className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap
@@ -728,13 +800,52 @@ export default function DashboardClient({
                 )}
               </button>
             )}
+            {canEdit && (
+              <button
+                onClick={() => {
+                  setActiveTab(ACTIVITY_LOG_TAB);
+                  if (activityLogs.length === 0) {
+                    setLogsLoading(true);
+                    fetch('/api/activity-logs')
+                      .then(r => r.ok ? r.json() : { logs: [] })
+                      .then(d => setActivityLogs(d.logs ?? []))
+                      .catch(() => {})
+                      .finally(() => setLogsLoading(false));
+                  }
+                }}
+                className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap
+                  ${activeTab === ACTIVITY_LOG_TAB ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'}`}>
+                <History className="w-3.5 h-3.5" />
+                היסטוריית פעולות
+              </button>
+            )}
           </div>
 
           <div className="p-4">
-            {activeTab === UNASSIGNED_TAB ? (
+            {activeTab === ACTIVITY_LOG_TAB ? (
+              !canEdit ? (
+                <div className="py-16 text-center">
+                  <Shield className="w-10 h-10 text-red-400 mx-auto mb-3" />
+                  <p className="font-semibold text-gray-700">גישה נדחתה</p>
+                  <p className="text-sm text-gray-400 mt-1">היסטוריית פעולות זמינה למשתמשים בעלי הרשאת עריכה בלבד.</p>
+                </div>
+              ) : logsLoading ? (
+                <div className="py-16 flex justify-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-olive-600" />
+                </div>
+              ) : activityLogs.length === 0 ? (
+                <p className="text-center py-10 text-gray-400 text-sm">אין פעולות בהיסטוריה</p>
+              ) : (
+                <div className="space-y-0 divide-y divide-gray-100">
+                  {activityLogs.map(log => (
+                    <ActivityLogRow key={log.id} log={log} />
+                  ))}
+                </div>
+              )
+            ) : activeTab === UNASSIGNED_TAB ? (
               <UnassignedTable
                 users={unassignedUsers}
-                platoons={platoons}
+                platoons={localPlatoons}
                 getStatus={getStatus}
                 onViewProfile={id => router.push(`/soldiers/${id}`)}
               />
@@ -743,7 +854,7 @@ export default function DashboardClient({
                 <h2 className="font-bold text-gray-800 mb-4">כל בקשות היציאה</h2>
                 <LeaveRequestsPanel
                   requests={leaveRequests}
-                  platoons={platoons}
+                  platoons={localPlatoons}
                   canManage={canManageRequests}
                   currentUserId={currentUser.id}
                   onApprove={approveLeaveRequest}
@@ -789,10 +900,10 @@ export default function DashboardClient({
                             positions={combat ? [...COMBAT_POSITION_LABELS] : []}
                             getSlotUser={pos => getSlotUser(crew.id, pos)}
                             getCrewAssignments={() => getCrewAssignments(crew.id)}
-                            onOpenSidebar={posLabel =>
-                              setSidebarState({ crewId: crew.id, crewName: crew.name, posLabel })
-                            }
-                            onUnassign={unassign}
+                            onOpenSidebar={canEdit
+                              ? posLabel => setSidebarState({ crewId: crew.id, crewName: crew.name, posLabel })
+                              : undefined}
+                            onUnassign={canEdit ? unassign : undefined}
                             onViewProfile={id => router.push(`/soldiers/${id}`)}
                             onDeleteCrew={canEdit ? () => deleteCrew(crew) : undefined}
                             getStatus={getStatus}
@@ -812,7 +923,7 @@ export default function DashboardClient({
                       </h3>
                       <LeaveRequestsPanel
                         requests={platoonLeaveRequests}
-                        platoons={platoons}
+                        platoons={localPlatoons}
                         canManage={canManageRequests}
                         currentUserId={currentUser.id}
                         platoonFilter={activeTab}
@@ -831,12 +942,12 @@ export default function DashboardClient({
       </main>
 
       {/* ── Assignment sidebar ───────────────────────────── */}
-      {sidebarState && (
+      {sidebarState && canEdit && (
         <AssignmentSidebar
           crewName={sidebarState.crewName}
           positionLabel={sidebarState.posLabel}
           eligibleSoldiers={getEligible(sidebarState.posLabel)}
-          platoons={platoons}
+          platoons={localPlatoons}
           getStatus={getStatus}
           onAssign={userId => assign(userId, sidebarState.crewId, sidebarState.posLabel)}
           onClose={() => setSidebarState(null)}
@@ -850,7 +961,7 @@ export default function DashboardClient({
         onClose={() => setWarningsOpen(false)}
         onNavigateCrew={crewId => {
           const crew    = localCrews.find(c => c.id === crewId);
-          const platoon = platoons.find(p => p.id === crew?.platoon_id);
+          const platoon = localPlatoons.find(p => p.id === crew?.platoon_id);
           if (platoon) { setActiveTabState(platoon.id); setViewModeState('tanks'); }
           setWarningsOpen(false);
         }}
@@ -944,6 +1055,17 @@ export default function DashboardClient({
           users={users}
           currentUserId={currentUser.id}
           onToggle={togglePermission}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {modal?.type === 'delete-platoon' && (
+        <ConfirmModal
+          title="מחיקת מחלקה"
+          message={`האם למחוק את "${modal.platoonName}"? פעולה זו תמחק את כל הצוותות במחלקה, תשחרר את כל החיילים המשובצים בה ותחזיר אותם ל"חיילים ללא שיבוץ". פעולה זו בלתי הפיכה.`}
+          confirmLabel="מחק מחלקה"
+          danger
+          onConfirm={() => deletePlatoon(modal.platoonId)}
           onClose={() => setModal(null)}
         />
       )}
@@ -1283,6 +1405,26 @@ function StatCard({
       <p className="text-xl font-bold text-gray-800 leading-none">{value}</p>
       <p className="text-[11px] font-semibold text-gray-600 mt-1 leading-tight">{label}</p>
       {sub && <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">{sub}</p>}
+    </div>
+  );
+}
+
+// ── Activity Log Row ───────────────────────────────────────────
+function ActivityLogRow({ log }: { log: ActivityLog }) {
+  const dt = new Date(log.created_at).toLocaleString('he-IL', {
+    day: '2-digit', month: '2-digit', year: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  });
+  return (
+    <div className="flex items-start gap-3 py-2.5 text-sm">
+      <span className="text-gray-400 text-xs whitespace-nowrap mt-0.5 w-28 shrink-0">{dt}</span>
+      <span className="font-medium text-gray-700 w-32 shrink-0">{log.actor_name ?? 'מערכת'}</span>
+      <span className="text-gray-600 flex-1">{log.action}</span>
+      {log.details && Object.keys(log.details).length > 0 && (
+        <span className="text-[11px] text-gray-400 max-w-[200px] truncate" title={JSON.stringify(log.details)}>
+          {JSON.stringify(log.details)}
+        </span>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createAdminClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import type { NextRequest } from 'next/server';
 import type { UserRow } from '@/types/database';
 import type { Database } from '@/types/database';
 
@@ -77,4 +78,55 @@ export async function requireRole(
   const user = await getAuthenticatedUser();
   if (!allowedRoles.includes(user.role)) redirect('/dashboard');
   return user;
+}
+
+// ── Request-scoped permission resolver for API Route Handlers ─
+// Uses request.cookies (not next/headers) so it works in any context.
+// Returns null on missing/invalid session — never redirects.
+
+const OFFICER_ROLES_SET = new Set(['company_commander', 'platoon_commander', 'crew_commander']);
+
+export interface CallerPermissions {
+  userId:          string;
+  isAdmin:         boolean;
+  canEdit:         boolean;
+  canViewFeedback: boolean;
+}
+
+export async function getCallerProfile(request: NextRequest): Promise<CallerPermissions | null> {
+  const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    .replace(/https?:\/\//, '')
+    .replace(/\.supabase\.co.*/, '');
+
+  const raw = request.cookies.get(`sb-${projectRef}-auth-token`)?.value;
+  if (!raw) return null;
+
+  try {
+    const session = JSON.parse(raw);
+    if (!session?.access_token) return null;
+
+    const admin = createAdminClient();
+    const { data: authData } = await admin.auth.getUser(session.access_token);
+    if (!authData.user) return null;
+
+    const { data: profile } = await admin
+      .from('users')
+      .select('role, is_admin, can_edit_roster, can_view_feedback')
+      .eq('id', authData.user.id)
+      .single();
+
+    if (!profile) return null;
+
+    const isAdmin   = profile.is_admin || profile.role === 'company_commander';
+    const isOfficer = OFFICER_ROLES_SET.has(profile.role);
+
+    return {
+      userId:          authData.user.id,
+      isAdmin,
+      canEdit:         isAdmin || isOfficer || profile.can_edit_roster,
+      canViewFeedback: isAdmin || isOfficer || profile.can_view_feedback,
+    };
+  } catch {
+    return null;
+  }
 }

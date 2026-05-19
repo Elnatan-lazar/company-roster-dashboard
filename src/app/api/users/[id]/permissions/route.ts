@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { createClient } from '@/lib/supabase/server';
+import { getCallerProfile } from '@/lib/auth/get-user';
 
 // PATCH /api/users/[id]/permissions
 // Body: { can_edit_roster?: boolean, can_view_feedback?: boolean, is_admin?: boolean }
@@ -9,18 +9,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const supabase = createClient();
-  const admin    = createAdminClient();
-
-  // Verify caller is authenticated
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  // Verify caller has is_admin flag
-  const { data: caller } = await admin.from('users').select('is_admin').eq('id', user.id).single();
-  if (!caller?.is_admin) {
-    return NextResponse.json({ error: 'Only admins can modify permissions' }, { status: 403 });
-  }
+  const caller = await getCallerProfile(request);
+  if (!caller)          return NextResponse.json({ error: 'Unauthorized' },                    { status: 401 });
+  if (!caller.isAdmin)  return NextResponse.json({ error: 'Only admins can modify permissions' }, { status: 403 });
 
   const body = await request.json() as Record<string, unknown>;
 
@@ -33,6 +24,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'No valid permission fields provided' }, { status: 400 });
   }
 
+  const admin = createAdminClient();
   const { data, error } = await admin
     .from('users')
     .update(patch)

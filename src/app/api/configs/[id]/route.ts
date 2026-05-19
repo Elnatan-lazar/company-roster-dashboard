@@ -1,11 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { getCallerProfile } from '@/lib/auth/get-user';
 
-// DELETE /api/configs/[id]  → delete a config (guard: at least 1 must remain)
+// DELETE /api/configs/[id] → delete a config (requires canEdit; at least 1 must remain)
 export async function DELETE(
-  _req: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const caller = await getCallerProfile(request);
+  if (!caller)         return NextResponse.json({ error: 'Unauthorized' },    { status: 401 });
+  if (!caller.canEdit) return NextResponse.json({ error: 'אין הרשאות עריכה' }, { status: 403 });
+
   const admin = createAdminClient();
 
   const { count } = await admin
@@ -28,12 +33,15 @@ export async function DELETE(
   return NextResponse.json({ success: true });
 }
 
-// POST /api/configs/[id]?action=duplicate  → duplicate a config with all its assignments
-// Body: { name: string }
+// POST /api/configs/[id]?action=duplicate → duplicate a config (requires canEdit)
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const caller = await getCallerProfile(request);
+  if (!caller)         return NextResponse.json({ error: 'Unauthorized' },    { status: 401 });
+  if (!caller.canEdit) return NextResponse.json({ error: 'אין הרשאות עריכה' }, { status: 403 });
+
   const { searchParams } = new URL(request.url);
   if (searchParams.get('action') !== 'duplicate') {
     return NextResponse.json({ error: 'unknown action' }, { status: 400 });
@@ -44,7 +52,6 @@ export async function POST(
 
   const admin = createAdminClient();
 
-  // Create new config
   const { data: newConfig, error: cfgErr } = await admin
     .from('deployment_configs')
     .insert({ name: name.trim() })
@@ -53,7 +60,6 @@ export async function POST(
 
   if (cfgErr) return NextResponse.json({ error: cfgErr.message }, { status: 500 });
 
-  // Copy all assignments from source config
   const { data: srcAssignments, error: srcErr } = await admin
     .from('deployment_assignments')
     .select('user_id, crew_id, position_label')
@@ -68,11 +74,7 @@ export async function POST(
       crew_id:        a.crew_id,
       position_label: a.position_label,
     }));
-
-    const { error: insErr } = await admin
-      .from('deployment_assignments')
-      .insert(inserts);
-
+    const { error: insErr } = await admin.from('deployment_assignments').insert(inserts);
     if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
   }
 

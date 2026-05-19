@@ -10,7 +10,6 @@ import {
   FileDown, ChevronDown, Plus, Copy, Trash2, Target, X,
   Calendar, UserPlus, ClipboardList, KeyRound,
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import type {
   PlatoonRow, CrewRow, UserRow, SoldierStatus,
   DeploymentConfig, DeploymentAssignment, Warning, CompanySettings,
@@ -79,7 +78,6 @@ export default function DashboardClient({
 }: Props) {
   const router       = useRouter();
   const searchParams = useSearchParams();
-  const supabase     = createClient();
   const fileInput    = useRef<HTMLInputElement>(null);
   const [, startTransition] = useTransition();
 
@@ -484,11 +482,6 @@ export default function DashboardClient({
     startTransition(() => router.refresh());
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push('/auth/login');
-  };
-
   const today = new Date().toLocaleDateString('he-IL', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
@@ -507,7 +500,7 @@ export default function DashboardClient({
       <header className="bg-olive-800 text-white shadow-lg sticky top-0 z-20">
         <div className="max-w-7xl mx-auto px-3 py-2 flex items-center gap-3">
 
-          {/* Logo + user info + יציאה text */}
+          {/* Logo + user info */}
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-2xl select-none">🛡️</span>
             <div className="hidden sm:block leading-tight">
@@ -516,12 +509,6 @@ export default function DashboardClient({
                 className="text-sm font-semibold hover:text-olive-200 transition-colors block text-right"
               >
                 {currentUser.first_name} {currentUser.last_name}
-              </button>
-              <button
-                onClick={handleLogout}
-                className="text-xs text-olive-300 hover:text-white transition-colors"
-              >
-                יציאה
               </button>
             </div>
           </div>

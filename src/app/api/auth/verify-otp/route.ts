@@ -34,10 +34,21 @@ export async function POST(request: NextRequest) {
     .replace(/https?:\/\//, '')
     .replace(/\.supabase\.co.*/, '');
 
-  const cookieName  = `sb-${projectRef}-auth-token`;
-  const cookieValue = JSON.stringify(data.session);
+  const cookieName = `sb-${projectRef}-auth-token`;
 
-  console.log('[API-OTP] Attempting to set cookie:', cookieName, 'Value preview:', cookieValue.substring(0, 30));
+  // Store only token fields — the full session including the user object can
+  // exceed the browser's 4 KB per-cookie limit and be silently dropped.
+  const compactSession = {
+    access_token:  data.session.access_token,
+    refresh_token: data.session.refresh_token,
+    expires_in:    data.session.expires_in,
+    expires_at:    data.session.expires_at,
+    token_type:    data.session.token_type,
+  };
+  const cookieValue = JSON.stringify(compactSession);
+
+  console.log('[API-OTP] Cookie name:', cookieName, '| Value length (bytes):', cookieValue.length);
+  console.log('[API-OTP] Attempting to set cookie — Value preview:', cookieValue.substring(0, 50));
 
   const response = NextResponse.json({ success: true });
 

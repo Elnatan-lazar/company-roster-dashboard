@@ -42,7 +42,8 @@ export async function middleware(request: NextRequest) {
   const cookieName = `sb-${getProjectRef()}-auth-token`;
   const rawCookie  = request.cookies.get(cookieName)?.value;
 
-  console.log('[MIDDLEWARE] Raw cookie found:', !!rawCookie);
+  console.log('[MIDDLEWARE] Looking for cookie:', cookieName);
+  console.log('[MIDDLEWARE] Raw cookie found:', !!rawCookie, '| Length:', rawCookie?.length ?? 0);
 
   let authenticated = false;
 
